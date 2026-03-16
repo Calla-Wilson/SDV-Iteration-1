@@ -1,0 +1,25 @@
+{
+    "policyId": "org.ovin:my-policy",
+    "features": {
+        "VehicleSpeed": {
+            "properties": {
+                "value": 100.0
+            }
+        }, 
+        "EngineSpeed": {
+            "properties": {
+                "value": 200.0
+            }
+        },
+        "ThrottlePosition": {
+            "properties": {
+                "value": 50.0
+            }
+        },
+        "CoolantTemperature": {
+            "properties": {
+                "value": 40.0
+            }
+        }
+    }
+}
