@@ -229,3 +229,7 @@ docker compose down -v
 docker compose build --no-cache
 docker compose up -d
 ```
+
+
+dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart

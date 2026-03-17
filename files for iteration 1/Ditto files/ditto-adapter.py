@@ -29,8 +29,9 @@ import zenoh
 # ============================================================================
 
 ZENOH_TOPIC = os.environ.get("ZENOH_TOPIC", "vehicle/vehicle-21/telemetry")
-DITTO_BASE_URL = os.environ.get("DITTO_BASE_URL", "http://ditto:8080/api/2/things")
+DITTO_BASE_URL = os.environ.get("DITTO_BASE_URL", "http://ditto-nginx:80/api/2/things")
 THING_ID = "vehicle-21"
+DITTO_AUTH = ("devops", "foobar")
 
 # Safety thresholds
 OVERHEAT_THRESHOLD = 110.0
@@ -89,7 +90,8 @@ def _ditto_put(endpoint: str, data: Dict[str, Any]) -> bool:
         try:
             response = requests.put(
                 url, json=data, timeout=DITTO_TIMEOUT,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
+                auth=DITTO_AUTH
             )
             if response.status_code in [200, 201, 204]:
                 return True
@@ -262,7 +264,7 @@ def on_zenoh_sample(sample):
 
 def initialize_ditto_thing():
     try:
-        response = requests.get(f"{DITTO_BASE_URL}/{THING_ID}", timeout=DITTO_TIMEOUT)
+        response = requests.get(f"{DITTO_BASE_URL}/{THING_ID}", timeout=DITTO_TIMEOUT, auth=DITTO_AUTH)
         if response.status_code == 200:
             logger.info(f"Ditto Thing '{THING_ID}' already exists")
             return True
@@ -286,7 +288,8 @@ def initialize_ditto_thing():
         response = requests.put(
             f"{DITTO_BASE_URL}/{THING_ID}",
             json=thing_definition, timeout=DITTO_TIMEOUT,
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
+            auth=DITTO_AUTH
         )
         if response.status_code in [200, 201]:
             logger.info(f"Created Ditto Thing '{THING_ID}'")
@@ -302,7 +305,7 @@ def initialize_ditto_thing():
 async def wait_for_ditto(max_retries=10, delay=2.0):
     for attempt in range(max_retries):
         try:
-            response = requests.get(f"{DITTO_BASE_URL}/{THING_ID}", timeout=DITTO_TIMEOUT)
+            response = requests.get(f"{DITTO_BASE_URL}/{THING_ID}", timeout=DITTO_TIMEOUT, auth=DITTO_AUTH)
             if response.status_code in [200, 404]:
                 logger.info("Ditto is available")
                 return True
