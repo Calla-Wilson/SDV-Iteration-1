@@ -81,7 +81,7 @@ SDV-Iteration-1/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/<your-username>/SDV-Iteration-1.git
+git clone https://github.com/Calla-Wilson/SDV-Iteration-1.git
 cd SDV-Iteration-1
 ```
 
