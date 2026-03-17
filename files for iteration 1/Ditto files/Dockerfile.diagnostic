@@ -1,0 +1,13 @@
+# Dockerfile.diagnostic
+# Runs the OpenSOVD diagnostic gateway (Flask API querying Ditto)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    flask \
+    requests
+
+COPY diagnostic-api.py /app/diagnostic-api.py
+
+CMD ["python", "/app/diagnostic-api.py"]

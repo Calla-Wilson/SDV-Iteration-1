@@ -1,0 +1,17 @@
+# Dockerfile.bridge
+# Runs kuksa_to_zenoh.py (bridge) or send_obd_data_to_kuksa.py (simulator)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    kuksa-client \
+    eclipse-zenoh \
+    requests
+
+# Copy scripts
+COPY kuksa_to_zenoh.py /app/kuksa_to_zenoh.py
+COPY send_obd_data_to_kuksa.py /app/send_obd_data_to_kuksa.py
+
+# Default: run the bridge
+CMD ["python", "/app/kuksa_to_zenoh.py"]

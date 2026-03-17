@@ -1,0 +1,13 @@
+# Dockerfile.adapter
+# Runs ditto-adapter.py: subscribes to Zenoh, updates Ditto digital twin
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    eclipse-zenoh \
+    requests
+
+COPY ditto-adapter.py /app/ditto-adapter.py
+
+CMD ["python", "/app/ditto-adapter.py"]

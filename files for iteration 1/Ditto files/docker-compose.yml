@@ -1,0 +1,195 @@
+# =============================================================================
+# SDV Iteration 1 - Full Pipeline Docker Compose
+# =============================================================================
+# Pipeline: Vehicle Data Source → Kuksa → Zenoh → Ditto → OpenSOVD
+#
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose logs -f        # Follow all logs
+#   docker-compose down           # Stop everything
+#
+# After services are up, run the simulator:
+#   docker-compose exec kuksa-to-zenoh python /app/send_obd_data_to_kuksa.py
+#   OR run send_obd_data_to_kuksa.py locally against localhost:55555
+# =============================================================================
+
+version: "3.8"
+
+networks:
+  sdv-network:
+    driver: bridge
+
+services:
+  # ===========================================================================
+  # 1. Eclipse Kuksa Databroker - Vehicle Data Abstraction Layer
+  # ===========================================================================
+  kuksa:
+    image: ghcr.io/eclipse-kuksa/kuksa-databroker:main
+    container_name: kuksa
+    ports:
+      - "55555:55555"
+    volumes:
+      - ./OBD.json:/OBD.json:ro
+    command: ["--insecure", "--vss", "/OBD.json"]
+    networks:
+      - sdv-network
+    healthcheck:
+      test: ["CMD-SHELL", "grpc_health_probe -addr=:55555 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # ===========================================================================
+  # 2. Eclipse Zenoh Router - Distributed Data Transport
+  # ===========================================================================
+  zenoh:
+    image: eclipse/zenoh:latest
+    container_name: zenoh
+    ports:
+      - "7447:7447"
+    networks:
+      - sdv-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/@/router/local || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # ===========================================================================
+  # 3. MongoDB - Backend storage for Eclipse Ditto
+  # ===========================================================================
+  mongodb:
+    image: mongo:6.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ditto
+      MONGO_INITDB_ROOT_PASSWORD: ditto
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - sdv-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "-u", "ditto", "-p", "ditto"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # ===========================================================================
+  # 4. Eclipse Ditto - Digital Twin Backend
+  # ===========================================================================
+  # Ditto requires several microservices. We use the all-in-one image for
+  # simplicity, which bundles policies, things, search, connectivity, and
+  # the gateway behind an nginx reverse proxy.
+  # ===========================================================================
+  ditto:
+    image: eclipse/ditto:latest
+    container_name: ditto
+    ports:
+      - "8080:8080"
+    environment:
+      - DITTO_MONGODB_URI=mongodb://ditto:ditto@mongodb:27017/ditto
+      - DITTO_DEVOPS_PASSWORD=foobar
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - sdv-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/status/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  # ===========================================================================
+  # 5. Kuksa-to-Zenoh Bridge
+  #    Reads from Kuksa Databroker, publishes to Zenoh topic.
+  #    Also includes the send_obd script so you can run the simulator.
+  # ===========================================================================
+  kuksa-to-zenoh:
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    container_name: kuksa-to-zenoh
+    depends_on:
+      kuksa:
+        condition: service_started
+      zenoh:
+        condition: service_started
+    environment:
+      - KUKSA_HOST=kuksa
+      - KUKSA_PORT=55555
+    networks:
+      - sdv-network
+    restart: on-failure
+
+  # ===========================================================================
+  # 6. Ditto Adapter - Zenoh-to-Ditto Bridge
+  #    Subscribes to Zenoh topic, evaluates safety rules, updates Ditto Thing.
+  # ===========================================================================
+  ditto-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile.adapter
+    container_name: ditto-adapter
+    depends_on:
+      ditto:
+        condition: service_healthy
+      zenoh:
+        condition: service_started
+    environment:
+      - DITTO_BASE_URL=http://ditto:8080/api/2/things
+      - ZENOH_TOPIC=vehicle/vehicle-21/telemetry
+    networks:
+      - sdv-network
+    restart: on-failure
+
+  # ===========================================================================
+  # 7. OpenSOVD Diagnostic API
+  #    Queries Ditto for vehicle health and fault information.
+  # ===========================================================================
+  diagnostic-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.diagnostic
+    container_name: diagnostic-api
+    ports:
+      - "20002:20002"
+    depends_on:
+      ditto:
+        condition: service_healthy
+    environment:
+      - DITTO_URL=http://ditto:8080/api/2/things/vehicle-21
+    networks:
+      - sdv-network
+    restart: on-failure
+
+  # ===========================================================================
+  # 8. Vehicle Data Simulator (send OBD data into Kuksa)
+  #    Runs the 36-second simulation sequence, then exits.
+  #    Start manually:  docker-compose run simulator
+  # ===========================================================================
+  simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    container_name: simulator
+    entrypoint: ["python", "/app/send_obd_data_to_kuksa.py"]
+    depends_on:
+      kuksa:
+        condition: service_started
+    environment:
+      - KUKSA_HOST=kuksa
+      - KUKSA_PORT=55555
+    networks:
+      - sdv-network
+    profiles:
+      - simulate   # Only runs when explicitly requested
+
+volumes:
+  mongo-data:

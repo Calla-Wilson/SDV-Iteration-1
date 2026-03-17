@@ -1,7 +1,12 @@
+import os
 import time
 import asyncio
 from kuksa_client.grpc.aio import VSSClient
 from kuksa_client.grpc import Datapoint
+
+# Use environment variable so it works both locally (127.0.0.1) and in Docker (kuksa)
+KUKSA_HOST = os.environ.get("KUKSA_HOST", "127.0.0.1")
+KUKSA_PORT = int(os.environ.get("KUKSA_PORT", "55555"))
 
 def get_vehicle_state(t):
     state = {
@@ -54,47 +59,36 @@ def get_vehicle_state(t):
         state["engineTemperature"] = 118
 
     return state
-# Asynchronous main function to connect to Kuksa Databroker and retrieve OBD data
+
 async def main():
-    # Establish an asynchronous connection to the Kuksa Databroker at the IP: 127.0.0.1 and port 55555
-    async with VSSClient('127.0.0.1', 55555) as client:
+    print(f"[Simulator] Connecting to Kuksa at {KUKSA_HOST}:{KUKSA_PORT} ...")
+    async with VSSClient(KUKSA_HOST, KUKSA_PORT) as client:
+        print("[Simulator] Connected. Starting 36-second simulation sequence.")
 
-        # Repeat for 36 seconds
-            for t in range(0, 37):
-                print('Time =  ', t)
-                state = get_vehicle_state(t)
-                # use state values for each data point
-                Speed = state["speed"]
-                SteeringAngle = state["steeringAngle"]
-                EngineTemperature = state["engineTemperature"]
-                BatteryLevel = state["batteryLevel"]
-            
-                # Send the values to the Kuksa Databroker with the
-                # corresponding vehicle data paths using the 'set_current_values' function
-              		# Can't figure out how to change the paths but since they just need to pass through data its fine
-                    # just dont change the Vehicle.OBD.*** stuff
-                values = await client.set_current_values({
-                    'Vehicle.OBD.VehicleSpeed': Datapoint(Speed),
-                    'Vehicle.OBD.ThrottlePosition': Datapoint(SteeringAngle),
-                    'Vehicle.OBD.CoolantTemperature': Datapoint(EngineTemperature),
-                    'Vehicle.OBD.EngineSpeed': Datapoint(BatteryLevel),
-                })
+        for t in range(0, 37):
+            print(f'Time = {t}')
+            state = get_vehicle_state(t)
 
-                # Print the value for each feature
-                print('Vehicle Speed = ', Speed)
-                print('Engine Temperature = ', EngineTemperature)
-                print('Steering Angle = ', SteeringAngle)
-                print('Battery Level = ', BatteryLevel)
+            Speed = state["speed"]
+            SteeringAngle = state["steeringAngle"]
+            EngineTemperature = state["engineTemperature"]
+            BatteryLevel = state["batteryLevel"]
 
-                # Pause for 1 second
-                time.sleep(1)
+            await client.set_current_values({
+                'Vehicle.OBD.VehicleSpeed': Datapoint(Speed),
+                'Vehicle.OBD.ThrottlePosition': Datapoint(SteeringAngle),
+                'Vehicle.OBD.CoolantTemperature': Datapoint(EngineTemperature),
+                'Vehicle.OBD.EngineSpeed': Datapoint(BatteryLevel),
+            })
 
-                print('-----------------------------')
-                
-				# break the loop after 36 seconds
-                if t == 36:
-                    print('End of Sequence')
-                    break
+            print(f'Vehicle Speed = {Speed}')
+            print(f'Engine Temperature = {EngineTemperature}')
+            print(f'Steering Angle = {SteeringAngle}')
+            print(f'Battery Level = {BatteryLevel}')
 
-# Run the main function
+            time.sleep(1)
+            print('-----------------------------')
+
+        print('End of Sequence')
+
 asyncio.run(main())
