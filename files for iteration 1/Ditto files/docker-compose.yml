@@ -1,5 +1,5 @@
 # =============================================================================
-# SDV Iteration 1 - Full Pipeline Docker Compose
+# SDV Iteration 2 - Full Pipeline Docker Compose
 # =============================================================================
 # Pipeline: Vehicle Data Source -> Kuksa -> Zenoh -> Ditto -> OpenSOVD
 #
@@ -8,6 +8,12 @@
 #   docker compose logs -f            # Follow all logs
 #   docker compose run --rm simulator # Run the 36s vehicle simulation
 #   docker compose down               # Stop everything
+#
+# Iteration 2 Extension:
+#   ZENOH_DELAY_MS controls network delay injection in the Kuksa-to-Zenoh bridge.
+#   Set to 0 for baseline, 200 for experiment.
+#   After changing the value, restart the bridge:
+#     docker compose up -d --force-recreate kuksa-to-zenoh
 # =============================================================================
 
 networks:
@@ -230,6 +236,8 @@ services:
     environment:
       - KUKSA_HOST=kuksa
       - KUKSA_PORT=55555
+      - ZENOH_DELAY_MS=0              # Iteration 2: Network delay injection (ms)
+                                       # Set to 0 for baseline, 200 for experiment
     networks:
       - sdv-network
     restart: on-failure

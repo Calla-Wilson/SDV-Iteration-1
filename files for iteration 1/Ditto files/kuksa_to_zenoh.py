@@ -1,5 +1,6 @@
 import json
 import asyncio
+import os
 import time
 import zenoh
 from kuksa_client.grpc.aio import VSSClient
@@ -17,10 +18,17 @@ VSS_PATHS = [
     "Vehicle.OBD.EngineSpeed",         # -> batteryLevel
 ]
 
-# FUNCTIONAL MODIFICATION: overheat safety threshold (degrees Celsius).
+# FUNCTIONAL MODIFICATION (Iteration 1): overheat safety threshold (degrees Celsius).
 # When CoolantTemperature reaches or exceeds this value the bridge tags
 # the outgoing payload so Ditto / OpenSOVD can trigger alerts or rules.
 OVERHEAT_THRESHOLD = 110.0
+
+# ITERATION 2 EXTENSION: Configurable network delay injection (milliseconds).
+# Simulates real-world network latency in vehicle-to-cloud communication.
+# Set via the ZENOH_DELAY_MS environment variable in docker-compose.yml.
+# Default is 0 (no delay). Example: ZENOH_DELAY_MS=200 adds 200ms delay
+# before each Zenoh publish to simulate cellular or satellite network lag.
+ZENOH_DELAY_MS = int(os.environ.get("ZENOH_DELAY_MS", "0"))
 
 
 def build_payload(values: dict) -> dict:
@@ -62,6 +70,7 @@ def _val(values: dict, path: str):
 
 async def main():
     print(f"[KuksaToZenoh] Connecting to Kuksa at {KUKSA_HOST}:{KUKSA_PORT} ...")
+    print(f"[KuksaToZenoh] Network delay injection: {ZENOH_DELAY_MS} ms")
 
     # Open Zenoh session (default peer-to-peer config; resolves to the
     # zenoh container on the same Docker network)
@@ -82,6 +91,12 @@ async def main():
 
                 # Only publish when at least one value is present
                 if any(v is not None for v in payload["telemetry"].values()):
+
+                    # ITERATION 2: Inject configurable delay before publishing
+                    # to simulate real-world network latency (cellular, satellite, etc.)
+                    if ZENOH_DELAY_MS > 0:
+                        await asyncio.sleep(ZENOH_DELAY_MS / 1000.0)
+
                     msg = json.dumps(payload)
                     publisher.put(msg)
 
@@ -94,12 +109,15 @@ async def main():
                             f"(temp={temp} C >= threshold={OVERHEAT_THRESHOLD} C) ***"
                         )
 
+                    # Include delay info in log output for visibility
+                    delay_info = f" | delay={ZENOH_DELAY_MS}ms" if ZENOH_DELAY_MS > 0 else ""
                     print(
                         f"[KuksaToZenoh] Published -> "
                         f"speed={payload['telemetry']['speed']} km/h | "
                         f"steer={payload['telemetry']['steeringAngle']} | "
                         f"temp={temp} C | "
-                        f"batt={payload['telemetry']['batteryLevel']}% | "
+                        f"batt={payload['telemetry']['batteryLevel']}%"
+                        f"{delay_info} | "
                         f"fault={payload['fault_active']}"
                     )
                     prev_temp = temp

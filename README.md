@@ -1,8 +1,8 @@
-# SDV-Iteration-1: Software-Defined Vehicle Data Pipeline
+# SDV-Iteration-2: System Extension, Validation, and Evaluation
 
 ## SOFE 3290U — Software Quality and Project Management | Group 21
 
-A fully containerized Software-Defined Vehicle (SDV) data pipeline that simulates vehicle telemetry, processes it through an industry-standard SDV stack, and exposes it via a diagnostic API. The system demonstrates end-to-end data flow from a vehicle simulator through Eclipse Kuksa, Eclipse Zenoh, and Eclipse Ditto, with an Eclipse OpenSOVD-inspired diagnostic interface.
+Iteration 2 extends the baseline SDV pipeline from Iteration 1 by introducing system modifications, validating correct behavior, and measuring non-functional performance metrics.
 
 ---
 
@@ -15,7 +15,7 @@ Vehicle Simulator (send_obd_data_to_kuksa.py)
   Eclipse Kuksa (:55555)            — Vehicle Data Abstraction Layer
         │
         ▼
-  kuksa_to_zenoh.py                 — Bridge + Overheat Fault Detection
+  kuksa_to_zenoh.py                 — Bridge + Overheat Detection + Delay Injection
         │
         ▼
   Eclipse Zenoh (:7447)             — Distributed Data Transport
@@ -32,188 +32,88 @@ Vehicle Simulator (send_obd_data_to_kuksa.py)
 
 ---
 
-## SDV Components
+## What Changed in Iteration 2
 
-| Component | Role | Port |
-|-----------|------|------|
-| **Eclipse Kuksa** | Vehicle data abstraction layer. Receives and normalizes raw OBD signals into a structured vehicle model. Acts as the single source of truth for vehicle state. | 55555 |
-| **Eclipse Zenoh** | Distributed data transport. Routes vehicle telemetry from Kuksa to Ditto, enabling simulation of real-world network conditions. | 7447 |
-| **Eclipse Ditto** | Digital twin backend. Persists vehicle state over time, manages the digital twin for vehicle-21, applies safety rules and policies, and exposes REST APIs. | 8080 |
-| **Eclipse OpenSOVD** (diagnostic-api) | Vehicle diagnostics interface. Queries Ditto for vehicle health, detects and reports faults, and provides diagnostic endpoints. | 20002 |
+### Zenoh Network Delay Injection
 
----
+Configurable network delay was added to `kuksa_to_zenoh.py` to simulate real-world latency in vehicle-to-cloud communication. The delay is controlled via the `ZENOH_DELAY_MS` environment variable in `docker-compose.yml`.
 
-## Prerequisites
-
-- **Docker Desktop** — [Download here](https://docs.docker.com/desktop/setup/install/windows-install/)
-- **Git** — [Download here](https://gitforwindows.org/)
-
-After installing Docker Desktop, restart your computer and ensure Docker Desktop is running (whale icon in system tray) before proceeding.
+**Files modified:**
+- `kuksa_to_zenoh.py` — added `import os`, `ZENOH_DELAY_MS` config variable, and `asyncio.sleep()` before Zenoh publish
+- `docker-compose.yml` — added `ZENOH_DELAY_MS=0` to the `kuksa-to-zenoh` service environment
 
 ---
 
-## Project Structure
+## Setup and Run
 
-```
-SDV-Iteration-1/
-├── docker-compose.yml              # Orchestrates all containers
-├── Dockerfile.adapter              # Builds ditto-adapter container
-├── Dockerfile.bridge               # Builds kuksa-to-zenoh bridge container
-├── Dockerfile.diagnostic           # Builds OpenSOVD diagnostic API container
-├── nginx.conf                      # Nginx reverse proxy config for Ditto
-├── nginx.htpasswd                  # Ditto basic auth credentials (devops:foobar)
-├── OBD.json                        # Kuksa vehicle signal definitions (VSS)
-├── policy.json                     # Ditto access control policy
-├── VSS_Ditto.json                  # Ditto digital twin model definition
-├── kuksa_to_zenoh.py               # Bridge: reads Kuksa → publishes to Zenoh
-├── ditto-adapter.py                # Bridge: subscribes Zenoh → updates Ditto
-├── diagnostic-api.py               # OpenSOVD diagnostic REST API
-├── send_obd_data_to_kuksa.py       # Vehicle simulator (36-second sequence)
-├── retrieve_obd_data_from_kuksa.py # Utility: reads current Kuksa values
-├── vehicle_data_source.py          # Standalone data source (JSON output)
-└── README.md
-```
-
----
-
-## Installation & Setup
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/Calla-Wilson/SDV-Iteration-1.git
-cd SDV-Iteration-1
-```
-
-### 2. Start the Pipeline
+### 1. Start the Pipeline
 
 ```bash
 docker compose up -d
 ```
 
-This pulls all required images and starts 12 containers (Kuksa, Zenoh, MongoDB, 5 Ditto microservices, Nginx, kuksa-to-zenoh bridge, ditto-adapter, and diagnostic-api). First run takes 5–10 minutes depending on internet speed.
-
-### 3. Wait for Ditto to Initialize
-
-Ditto's Java microservices take approximately 1–2 minutes to fully start. Check status:
+Wait 1–2 minutes for Ditto to initialize, then verify:
 
 ```bash
 docker compose ps
-```
-
-Verify Ditto is healthy:
-
-```bash
 curl -u devops:foobar http://localhost:8080/status/health
 ```
 
-Expected response: `{"status":"UP"}`
-
-### 4. Create the Ditto Policy and Thing
-
-Before running the simulator for the first time, create the access policy and digital twin:
+### 2. Create Ditto Policy and Thing (first run only)
 
 ```bash
 curl -X PUT -u devops:foobar http://localhost:8080/api/2/policies/org.ovin:my-policy \
   -H 'Content-Type: application/json' \
   -d '{"entries":{"DEFAULT":{"subjects":{"nginx:devops":{"type":"Ditto user authenticated via nginx"}},"resources":{"policy:/":{"grant":["READ","WRITE"],"revoke":[]},"thing:/":{"grant":["READ","WRITE"],"revoke":[]},"message:/":{"grant":["READ","WRITE"],"revoke":[]}}}}}'
-```
 
-```bash
 curl -X PUT -u devops:foobar http://localhost:8080/api/2/things/org.ovin:vehicle-21 \
   -H 'Content-Type: application/json' \
   -d '{"policyId":"org.ovin:my-policy","features":{}}'
 ```
 
-### 5. Run the Vehicle Simulator
+### 3. Run the Simulator
 
 ```bash
 docker compose run --rm simulator
 ```
 
-This sends 36 seconds of simulated vehicle data through the full pipeline, covering 6 driving phases: Idle → Accelerating → Turning → Cruising → Overheat Fault → Safety Slowdown.
-
----
-
-## Verifying the Pipeline
-
-### Check Kuksa-to-Zenoh Bridge Logs
+### 4. Verify Data Flow
 
 ```bash
-docker compose logs kuksa-to-zenoh | grep "Published"
-```
-
-### Check Ditto Adapter Logs
-
-```bash
+docker compose logs kuksa-to-zenoh | tail -20
 docker compose logs ditto-adapter | tail -20
-```
-
-### Query the Digital Twin (Ditto REST API)
-
-```bash
-# Full Thing state
-curl -u devops:foobar http://localhost:8080/api/2/things/org.ovin:vehicle-21 | python3 -m json.tool
-
-# OBD telemetry
 curl -u devops:foobar http://localhost:8080/api/2/things/org.ovin:vehicle-21/features/OBD | python3 -m json.tool
-
-# Safety constraints
-curl -u devops:foobar http://localhost:8080/api/2/things/org.ovin:vehicle-21/features/Safety | python3 -m json.tool
-
-# Diagnostics
-curl -u devops:foobar http://localhost:8080/api/2/things/org.ovin:vehicle-21/features/Diagnostics | python3 -m json.tool
 ```
 
-### Query via OpenSOVD Diagnostic API
+---
+
+## Running the Delay Experiment
+
+### Baseline Run (no delay)
+
+Ensure `ZENOH_DELAY_MS=0` in `docker-compose.yml`, then:
 
 ```bash
-# Vehicle discovery
-curl http://localhost:20002/sovd/v1/vehicles/vehicle-21 | python3 -m json.tool
-
-# All OBD data
-curl http://localhost:20002/sovd/v1/vehicles/vehicle-21/data/OBD | python3 -m json.tool
-
-# Specific signal
-curl http://localhost:20002/sovd/v1/vehicles/vehicle-21/data/OBD/VehicleSpeed | python3 -m json.tool
-
-# System diagnostics
-curl http://localhost:20002/sovd/v1/vehicles/vehicle-21/diagnostics | python3 -m json.tool
-
-# Active faults
-curl http://localhost:20002/sovd/v1/vehicles/vehicle-21/faults | python3 -m json.tool
+docker compose up -d --force-recreate kuksa-to-zenoh
+docker compose run --rm simulator
+docker compose logs kuksa-to-zenoh | tail -20
 ```
 
----
+### Delayed Run (200ms)
 
-## Functional Modification: Overheat Safety Constraint
+Change `ZENOH_DELAY_MS=0` to `ZENOH_DELAY_MS=200` in `docker-compose.yml`, then:
 
-The system implements an engine overheat detection and safety constraint mechanism that spans multiple components:
+```bash
+docker compose up -d --force-recreate kuksa-to-zenoh
+docker compose run --rm simulator
+docker compose logs kuksa-to-zenoh | tail -20
+```
 
-**Detection (kuksa_to_zenoh.py):** When `CoolantTemperature >= 110°C`, the bridge flags the telemetry payload with `fault_active: true` and `fault_code: "ENGINE_OVERHEAT"`.
+The logs should show `delay=200ms` on each publish line. Verify the digital twin still updated:
 
-**Safety Rules (ditto-adapter.py):** The adapter evaluates safety rules on each update:
-- Sets `Safety/OverheatActive = true` and `Safety/SafetyConstraintActive = true`
-- Logs the fault to `Diagnostics/FaultHistory`
-- Sets `Diagnostics/SystemHealth = "CRITICAL"`
-- Implements hysteresis: fault clears only when temperature drops below 105°C
-
-**Diagnostics (diagnostic-api.py):** The OpenSOVD API exposes fault information via `/faults` and `/diagnostics` endpoints.
-
-This can be observed during simulation phases 5–6 (t=25 to t=36), where engine temperature rises from 110°C to 120°C before the safety slowdown phase begins.
-
----
-
-## Simulation Phases
-
-| Phase | Time (s) | Speed (km/h) | Engine Temp (°C) | Description |
-|-------|----------|---------------|-------------------|-------------|
-| Idle | 0–5 | 0 | 80 | Vehicle stationary |
-| Accelerating | 6–12 | 10→52 | 85→94 | Speed increases |
-| Turning | 13–18 | 40 | 95 | Steering angle changes |
-| Cruising | 19–24 | 55 | 100 | Steady state |
-| Overheat Fault | 25–30 | 50 | 110→120 | Fault triggered at 110°C |
-| Safety Slowdown | 31–36 | 50→20 | 118 | Speed reduced due to fault |
+```bash
+curl -u devops:foobar http://localhost:8080/api/2/things/org.ovin:vehicle-21/features/OBD | python3 -m json.tool
+```
 
 ---
 
@@ -221,26 +121,8 @@ This can be observed during simulation phases 5–6 (t=25 to t=36), where engine
 
 ```bash
 docker compose down
+docker compose down -v    # also removes MongoDB data
 ```
-
-To also remove stored data (MongoDB volume):
-
-```bash
-docker compose down -v
-```
-
----
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| `docker: command not found` | Docker Desktop is not running. Open it and wait for "running" status. |
-| Containers keep restarting | Check logs: `docker compose logs <service-name>` |
-| `connection refused` on curl | Ditto takes 1–2 min to start. Wait and retry. |
-| Port already in use | Stop conflicting service or change port in docker-compose.yml |
-| Thing not found (404) | Run the policy and Thing creation commands from Step 4. |
-| To fully reset | `docker compose down -v && docker compose build --no-cache && docker compose up -d` |
 
 ---
 
